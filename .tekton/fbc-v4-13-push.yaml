@@ -11,11 +11,11 @@ metadata:
       )
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: fbc-v4-13
+    appstudio.openshift.io/application: parodos-fbc
     appstudio.openshift.io/component: fbc-v4-13
     pipelines.appstudio.openshift.io/type: build
   name: fbc-v4-13-on-push
-  namespace: orchestrator-releng-tenant
+  namespace: arewm-tenant
 spec:
   params:
   - name: git-url
