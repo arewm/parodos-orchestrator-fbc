@@ -2,7 +2,7 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
-    build.appstudio.openshift.io/repo: https://github.com/parodos-dev/orchestrator-fbc?rev={{revision}}
+    build.appstudio.openshift.io/repo: https://github.com/arewm/parodos-orchestrator-fbc?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
@@ -12,11 +12,11 @@ metadata:
       )
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: fbc-v4-13
+    appstudio.openshift.io/application: parodos-fbc
     appstudio.openshift.io/component: fbc-v4-13
     pipelines.appstudio.openshift.io/type: build
   name: fbc-v4-13-on-pull-request
-  namespace: orchestrator-releng-tenant
+  namespace: arewm-tenant
 spec:
   params:
   - name: git-url
@@ -24,7 +24,7 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/orchestrator-releng-tenant/fbc-v4-13/fbc-v4-13:on-pr-{{revision}}
+    value: quay.io/redhat-user-workloads/arewm-tenant/parodos-fbc/fbc-v4-13:on-pr-{{revision}}
   - name: image-expires-after
     value: 5d
   - name: dockerfile
@@ -65,6 +65,9 @@ spec:
         - name: kind
           value: task
         resolver: bundles
+      workspaces:
+      - name: workspace
+        workspace: workspace
     params:
     - description: Source Repository URL
       name: git-url
@@ -101,10 +104,6 @@ spec:
     - default: ""
       description: Build dependencies to be prefetched by Cachi2
       name: prefetch-input
-      type: string
-    - default: "false"
-      description: Enable dev-package-managers in prefetch task
-      name: prefetch-dev-package-managers-enabled
       type: string
     - default: "false"
       description: Java build
@@ -145,7 +144,7 @@ spec:
         - name: name
           value: init
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-init:0.2@sha256:092c113b614f6551113f17605ae9cb7e822aa704d07f0e37ed209da23ce392cc
+          value: quay.io/konflux-ci/tekton-catalog/task-init:0.2@sha256:99c98d3e5195e9920482f2187590d6f9150c4b8a2001b1ce5dcd5077abda9481
         - name: kind
           value: task
         resolver: bundles
@@ -155,18 +154,14 @@ spec:
         value: $(params.git-url)
       - name: revision
         value: $(params.revision)
-      - name: ociStorage
-        value: "$(params.output-image).git"
-      - name: ociArtifactExpiresAfter
-        value: "$(params.image-expires-after)"
       runAfter:
       - init
       taskRef:
         params:
         - name: name
-          value: git-clone-oci-ta
+          value: git-clone
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-git-clone-oci-ta:0.1@sha256:b44ea49656037376056e62cb39d4ed73e5215814556be832f2a425eec31204ab
+          value: quay.io/konflux-ci/tekton-catalog/task-git-clone:0.1@sha256:de0ca8872c791944c479231e21d68379b54877aaf42e5f766ef4a8728970f8b3
         - name: kind
           value: task
         resolver: bundles
@@ -176,84 +171,10 @@ spec:
         values:
         - "true"
       workspaces:
+      - name: output
+        workspace: workspace
       - name: basic-auth
         workspace: git-auth
-    - name: extract-controller-image-name
-      params:
-      - name: CONTROLLER_LABEL
-        value: controller
-      - name: CONTEXT
-        value: $(params.path-context)
-      - name: SOURCE_ARTIFACT
-        value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
-      runAfter:
-      - clone-repository
-      taskSpec:
-        description: |-
-          This task retrieves the controller's fully qualified name from the bundle's image by introspecting the labels in the bundle for the
-          parametrized label that contains the controller's image.
-        params:
-        - name: CONTROLLER_LABEL
-          description: Label key defined in the bundle's container file that holds the controller's fully qualified image name
-          default: controller
-          type: string
-        - name: CONTEXT
-          default: .
-          description: Path to the directory to use as context.
-          type: string
-        - name: SOURCE_ARTIFACT
-          description: The Trusted Artifact URI pointing to the artifact with
-            the application source code.
-          type: string
-        results:
-        - name: CONTROLLER_IMAGE
-          description: Operator's controller's image name extracted from the label in the bundle image
-        volumes:
-        - name: workdir
-          emptyDir: {}
-        stepTemplate:
-          volumeMounts:
-          - mountPath: /var/workdir
-            name: workdir
-        steps:
-        - name: use-trusted-artifact
-          image: quay.io/redhat-appstudio/build-trusted-artifacts:latest@sha256:601e0999ae062e5ee666538d651af7893a75e415b7952c85caa8a4452501029a
-          args:
-            - use
-            - $(params.SOURCE_ARTIFACT)=/var/workdir/source
-        - name: skopeo-inspect
-          image: quay.io/konflux-ci/appstudio-utils@sha256:0fb4d1ee1f1526e85e00b4e41e72451d3fb9531ebf71291118be307c870633a0
-          workingDir: /var/workdir
-          computeResources:
-            limits:
-              memory: 512Mi
-            requests:
-              memory: 256Mi
-              cpu: 250m
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 65532
-          env:
-          - name: CONTROLLER_LABEL
-            value: $(params.CONTROLLER_LABEL)
-          - name: CONTEXT
-            value: $(params.CONTEXT)
-          script: |
-            set -ex
-            SOURCE_CODE_DIR=source
-
-            bundle_image=$(yq e '.image |select (.)' $SOURCE_CODE_DIR/$CONTEXT/graph.yaml)
-            if [[ -z "$bundle_image" ]]; then
-              echo "No bundle image found in "$SOURCE_CODE_DIR/$CONTEXT/graph.yaml
-              exit 1
-            fi
-            # Capture the controller' image name from the bundle's image defined as a label with key in CONTROLLER_LABEL
-            skopeo inspect --format '{{ index .Labels "'$CONTROLLER_LABEL'" }}' docker://$bundle_image | tee $(results.CONTROLLER_IMAGE.path)
-      when:
-      - input: $(tasks.init.results.build)
-        operator: in
-        values:
-        - "true"
     - name: build-container
       params:
       - name: IMAGE
@@ -268,19 +189,14 @@ spec:
         value: $(params.image-expires-after)
       - name: COMMIT_SHA
         value: $(tasks.clone-repository.results.commit)
-      - name: SOURCE_ARTIFACT
-        value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
-      - name: BUILD_ARGS
-        value:
-        - CONTROLLER=$(tasks.extract-controller-image-name.results.CONTROLLER_IMAGE)
       runAfter:
-      - extract-controller-image-name
+      - clone-repository
       taskRef:
         params:
         - name: name
-          value: buildah-oci-ta
+          value: buildah
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-buildah-oci-ta:0.2@sha256:e86e7f5f7fb45b6dcd6d267b94148cd850c0e307d1e33cf95d3e3cc957ebb83a
+          value: quay.io/konflux-ci/tekton-catalog/task-buildah:0.1@sha256:72e4ddd9b543e2766830e3a513da5c2fec26ea7a72a50e8c85be642912caa603
         - name: kind
           value: task
         resolver: bundles
@@ -289,8 +205,13 @@ spec:
         operator: in
         values:
         - "true"
+      workspaces:
+      - name: source
+        workspace: workspace
     - name: deprecated-base-image-check
       params:
+      - name: BASE_IMAGES_DIGESTS
+        value: $(tasks.build-container.results.BASE_IMAGES_DIGESTS)
       - name: IMAGE_URL
         value: $(tasks.build-container.results.IMAGE_URL)
       - name: IMAGE_DIGEST
@@ -344,10 +265,34 @@ spec:
         - name: name
           value: apply-tags
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-apply-tags:0.1@sha256:8a8c1342bfa0b263361cbbc28036750ebc3d7c2460230b14d641170b812dddcc
+          value: quay.io/konflux-ci/tekton-catalog/task-apply-tags:0.1@sha256:516875845f2988848ebde5f3e9c717d6077af7bf9b3cb2b34a3c3f86b2609a14
         - name: kind
           value: task
         resolver: bundles
+    - name: push-dockerfile
+      params:
+      - name: IMAGE
+        value: $(tasks.build-container.results.IMAGE_URL)
+      - name: IMAGE_DIGEST
+        value: $(tasks.build-container.results.IMAGE_DIGEST)
+      - name: DOCKERFILE
+        value: $(params.dockerfile)
+      - name: CONTEXT
+        value: $(params.path-context)
+      runAfter:
+      - build-container
+      taskRef:
+        params:
+        - name: name
+          value: push-dockerfile
+        - name: bundle
+          value: quay.io/konflux-ci/tekton-catalog/task-push-dockerfile:0.1@sha256:e2c8fa67da036cef81e407e28c14b6a2034c6564009e084c368005a4640c554c
+        - name: kind
+          value: task
+        resolver: bundles
+      workspaces:
+      - name: workspace
+        workspace: workspace
     - name: inspect-image
       params:
       - name: IMAGE_URL
@@ -423,6 +368,8 @@ spec:
     workspaces:
     - name: workspace
     - name: git-auth
+      optional: true
+    - name: netrc
       optional: true
   taskRunTemplate: {}
   workspaces:
