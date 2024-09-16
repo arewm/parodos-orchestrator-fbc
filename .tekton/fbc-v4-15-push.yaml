@@ -229,7 +229,7 @@ spec:
           description: Operator's controller's image name extracted from the label in the bundle image
         steps:
         - name: skopeo-inspect
-          image: quay.io/konflux-ci/appstudio-utils@sha256:0fb4d1ee1f1526e85e00b4e41e72451d3fb9531ebf71291118be307c870633a0
+          image: quay.io/konflux-ci/appstudio-utils@sha256:bbbeb8ea0acc4853d33dd447cfc652615adc77e2574ee06b6e365918e52feae8
           workingDir: $(workspaces.source.path)
           computeResources:
             limits:
